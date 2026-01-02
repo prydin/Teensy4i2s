@@ -147,7 +147,7 @@ void AudioInputI2Sslave::begin(void)
 	dma.TCD->DLASTSGA = -sizeof(i2s_rx_buffer);
 	dma.TCD->BITER_ELINKNO = sizeof(i2s_rx_buffer) / 4;
 	dma.TCD->CSR = DMA_TCD_CSR_INTHALF | DMA_TCD_CSR_INTMAJOR;
-	dma.triggerAtHardwareEvent(DMAMUX_SOURCE_SAI1_RX);
+	dma.triggerAtHardwareEvent(DMAMUX_SOURCE_SAI1_RX);   
 	dma.attachInterrupt(isr);
   
 	I2S1_RCSR = 0;
