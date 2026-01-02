@@ -35,6 +35,15 @@ static int32_t* bufferL[2] = { &dataL[0], &dataL[AUDIO_BLOCK_SAMPLES] };
 static int32_t* bufferR[2] = { &dataR[0], &dataR[AUDIO_BLOCK_SAMPLES] };
 int iter = 0;
 uint32_t AudioInputI2S::interruptIntervalMicros = 1; // initialized to 1 to avoid division by zero on first read
+uint32_t AudioInputI2S::numStableIntervals = 0;
+uint32_t AudioInputI2S::lastTimeStamp = 0;
+
+// Common sample rates for rounding to the neastest standard rate
+uint32_t standardSampleRates[] {
+	8000, 11025, 12000, 16000, 22050, 24000,
+	32000, 44100, 48000, 88200, 96000, 176400,
+	192000, 384000
+};
 
 DMAMEM __attribute__((aligned(32))) static uint64_t i2s_rx_buffer[AUDIO_BLOCK_SAMPLES*2];
 DMAChannel AudioInputI2S::dma(false);
@@ -76,10 +85,15 @@ int32_t** AudioInputI2S::getData()
 
 void AudioInputI2S::isr(void)
 {
-	static uint32_t lastTimeStamp = 0;
 	uint32_t currentTime = micros();
+	uint32_t prev = interruptIntervalMicros;
  	interruptIntervalMicros = currentTime - lastTimeStamp;
 	lastTimeStamp = currentTime;
+	if( abs((int32_t)interruptIntervalMicros - (int32_t)prev) < 100 ) {
+		numStableIntervals++;
+	} else {
+		numStableIntervals = 0;
+	}
 	
 	uint32_t daddr;
 	const int32_t *src;
@@ -142,8 +156,28 @@ void AudioInputI2Sslave::begin(void)
 	dma.enable();
 }
 
-uint32_t AudioInputI2Sslave::getMeasuredSampleRate(void)
+uint32_t AudioInputI2Sslave::getSampleRate(void)
 {
 	// Return the default sample rate if interruptIntervalMicros is zero to avoid division by zero
 	return interruptIntervalMicros > 0 ? (AUDIO_BLOCK_SAMPLES * 1000000) / interruptIntervalMicros : SAMPLERATE;
+}
+
+bool AudioInputI2Sslave::isSampleRateStable(void) 
+{
+	// Consider sample rate stable if the interrupt interval has been stable for more than 10 intervals and 
+	// the last interval is within 100ms of the current time
+	return interruptIntervalMicros > 2 && numStableIntervals > 10 && micros() - lastTimeStamp < 100000;
+ }
+
+ uint32_t AudioInputI2Sslave::getStandardizedSampleRate(void)
+ {
+	uint32_t measuredRate = getSampleRate();
+	uint32_t closestRate = -1;
+	for (size_t i = 1; i < sizeof(standardSampleRates) / sizeof(standardSampleRates[0]); i++) {
+		closestRate = standardSampleRates[i];
+		if(standardSampleRates[i] > measuredRate ) {
+			return (measuredRate - standardSampleRates[i-1]) < (standardSampleRates[i] - measuredRate) ? standardSampleRates[i-1] : standardSampleRates[i];
+		}
+	}
+	return closestRate;
 }
