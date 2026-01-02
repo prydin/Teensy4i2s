@@ -26,6 +26,7 @@
 
 #include "AudioConfig.h"
 #include "input_i2s.h"
+#include "output_i2s.h"
 
 // set up two flip-flopped buffers, one is used for queueing up data for processing, the other receives data from I2S codec
 static int32_t dataL[AUDIO_BLOCK_SAMPLES*2] = {0};
@@ -33,6 +34,7 @@ static int32_t dataR[AUDIO_BLOCK_SAMPLES*2] = {0};
 static int32_t* bufferL[2] = { &dataL[0], &dataL[AUDIO_BLOCK_SAMPLES] };
 static int32_t* bufferR[2] = { &dataR[0], &dataR[AUDIO_BLOCK_SAMPLES] };
 int iter = 0;
+uint32_t AudioInputI2S::interruptIntervalMicros = 1; // initialized to 1 to avoid division by zero on first read
 
 DMAMEM __attribute__((aligned(32))) static uint64_t i2s_rx_buffer[AUDIO_BLOCK_SAMPLES*2];
 DMAChannel AudioInputI2S::dma(false);
@@ -74,6 +76,11 @@ int32_t** AudioInputI2S::getData()
 
 void AudioInputI2S::isr(void)
 {
+	static uint32_t lastTimeStamp = 0;
+	uint32_t currentTime = micros();
+ 	interruptIntervalMicros = currentTime - lastTimeStamp;
+	lastTimeStamp = currentTime;
+	
 	uint32_t daddr;
 	const int32_t *src;
 	int32_t *dest_left, *dest_right;
@@ -104,4 +111,39 @@ void AudioInputI2S::isr(void)
 	
 	arm_dcache_delete((void*)src, sizeof(i2s_rx_buffer) / 2);
 	iter = iter == 0 ? 1 : 0;
+}
+
+void AudioInputI2Sslave::begin(void)
+{
+	dma.begin(true); // Allocate the DMA channel first
+
+	AudioOutputI2Sslave::config_i2s();
+
+	CORE_PIN8_CONFIG  = 3;  //1:RX_DATA0
+	IOMUXC_SAI1_RX_DATA0_SELECT_INPUT = 2;
+
+	dma.TCD->SADDR = (void *)((uint32_t)&I2S1_RDR0 + 2);
+	dma.TCD->SOFF = 0;
+	dma.TCD->ATTR = DMA_TCD_ATTR_SSIZE(2) | DMA_TCD_ATTR_DSIZE(2);
+	dma.TCD->NBYTES_MLNO = 4;
+	dma.TCD->SLAST = 0;
+	dma.TCD->DADDR = i2s_rx_buffer;
+	dma.TCD->DOFF = 4;
+	dma.TCD->CITER_ELINKNO = sizeof(i2s_rx_buffer) / 4;
+	dma.TCD->DLASTSGA = -sizeof(i2s_rx_buffer);
+	dma.TCD->BITER_ELINKNO = sizeof(i2s_rx_buffer) / 4;
+	dma.TCD->CSR = DMA_TCD_CSR_INTHALF | DMA_TCD_CSR_INTMAJOR;
+	dma.triggerAtHardwareEvent(DMAMUX_SOURCE_SAI1_RX);
+	dma.attachInterrupt(isr);
+  
+	I2S1_RCSR = 0;
+	I2S1_RCSR = I2S_RCSR_RE | I2S_RCSR_BCE | I2S_RCSR_FRDE | I2S_RCSR_FR;
+
+	dma.enable();
+}
+
+uint32_t AudioInputI2Sslave::getMeasuredSampleRate(void)
+{
+	// Return the default sample rate if interruptIntervalMicros is zero to avoid division by zero
+	return interruptIntervalMicros > 0 ? (AUDIO_BLOCK_SAMPLES * 1000000) / interruptIntervalMicros : SAMPLERATE;
 }

@@ -36,11 +36,24 @@ class AudioOutputI2S
 public:
 	static bool Enabled;
 	AudioOutputI2S(void) { }
-	void begin(void);
+	virtual void begin(void);
 	friend class AudioInputI2S;
 
 protected:
 	static void config_i2s(bool only_bclk = false);
+	static bool isConfigured;
 	static DMAChannel dma;
 	static void isr(void);
 };
+
+class AudioOutputI2Sslave : public AudioOutputI2S
+{
+public:
+	AudioOutputI2Sslave(void) : AudioOutputI2S() { } ;
+	virtual void begin(void) override;
+	friend class AudioInputI2Sslave;
+	friend void dma_ch0_isr(void);
+protected:
+	static void config_i2s(void);
+};
+

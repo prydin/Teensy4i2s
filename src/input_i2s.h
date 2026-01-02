@@ -35,11 +35,19 @@ class AudioInputI2S
 public:
 	AudioInputI2S() { }
 	void begin();
-	static int32_t** getData();
+	static int32_t** getData(); 
+	virtual uint32_t getMeasuredSampleRate(void) { return 44100; }	
+
 protected:	
 	static DMAChannel dma;
 	static void isr(void);
+	static uint32_t interruptIntervalMicros;
+};
 
-//private:
-	//static BufferQueue buffers;	
+class AudioInputI2Sslave : public AudioInputI2S
+{
+public:
+	AudioInputI2Sslave(void) : AudioInputI2S() { }
+	void begin(void);
+	virtual uint32_t getMeasuredSampleRate(void) override;
 };
